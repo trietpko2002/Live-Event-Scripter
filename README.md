@@ -77,10 +77,4 @@ Công cụ này đặc biệt hữu ích cho:
 
 ---
 
-**Cách sử dụng file này:**
-
-1.  Lưu lại nội dung trên vào một file có tên `README.md` trong thư mục gốc của dự án.
-2.  Mở file và điền thông tin cá nhân của bạn vào phần "Thông Tin Tác Giả".
-3.  Nếu bạn đưa dự án này lên GitHub, file `README.md` sẽ tự động được hiển thị làm trang giới thiệu chính cho dự án, rất chuyên nghiệp và tiện lợi.
-
 
