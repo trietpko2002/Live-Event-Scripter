@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>Live Event Scripter Studio</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mammoth@1.9.1/mammoth.browser.min.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div id="auth-screen" class="auth-screen">
+    <div class="auth-art"><div class="brand-mark">◈</div><span class="eyebrow">EVENT CONTROL STUDIO</span><h1>Kịch bản sống.<br><em>Điều hành trong tầm tay.</em></h1><p>Chuẩn bị nội dung, xếp mốc thời gian và theo dõi chương trình trực tiếp trên một không gian làm việc.</p><div class="auth-preview"><span>18:30</span><b>Đón khách</b><i></i><span>19:00</span><b>Khai mạc</b><i></i><span>19:15</span><b>Phát biểu</b></div></div>
+    <div class="auth-box"><div class="brand"><span class="brand-mark">◈</span><strong>Live Event Scripter</strong></div><span class="eyebrow">CHÀO MỪNG TRỞ LẠI</span><h2>Điều hành sự kiện<br>tự tin hơn.</h2><p>Đăng nhập Google để mở không gian làm việc. Kịch bản tiếp tục được lưu trên trình duyệt này.</p><button id="login-btn" class="btn primary full">Tiếp tục với Google <span>↗</span></button><p id="auth-error" class="error" role="alert"></p><small>Dữ liệu cục bộ không tự đồng bộ giữa các thiết bị. Hãy xuất bản sao lưu định kỳ.</small></div>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">◈</span><span>Live Event<br><b>Scripter Studio</b></span></div>
+      <div class="side-label">KHÔNG GIAN LÀM VIỆC</div>
+      <button class="nav active" data-view="timeline">▥ <span>Timeline</span></button>
+      <button class="nav" data-view="rundown">☷ <span>Danh sách mốc</span></button>
+      <button class="nav" data-view="scripts">▧ <span>Kịch bản</span></button>
+      <div class="side-label with-action">KỊCH BẢN <button id="quick-add-script" title="Tạo kịch bản" aria-label="Tạo kịch bản">＋</button></div>
+      <div id="sidebar-scripts" class="sidebar-scripts"></div>
+      <div class="side-bottom"><button id="import-side" class="nav">↥ <span>Nhập & chuyển đổi</span></button><button id="export-side" class="nav">↧ <span>Sao lưu tất cả</span></button><div id="account" class="account"></div></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar"><div class="mobile-brand">◈ Live Event Scripter</div><div class="breadcrumb">Không gian làm việc <span>›</span> <strong id="breadcrumb-name">Kịch bản</strong></div><div class="top-actions"><span id="save-state" class="save-state">● Đã lưu</span><button id="undo-btn" class="icon-btn" title="Hoàn tác (Ctrl+Z)">↶</button><button id="redo-btn" class="icon-btn" title="Làm lại (Ctrl+Y)">↷</button><button id="export-btn" class="btn subtle">↓ Xuất JSON</button><button id="import-btn" class="btn primary">＋ Nhập kịch bản</button></div></header>
+
+      <main>
+        <section class="hero"><div><div class="eyebrow"><span class="live-dot"></span> BÀN ĐIỀU HÀNH SỰ KIỆN</div><input id="event-title" class="event-title" aria-label="Tên chương trình" maxlength="140"><div class="event-meta"><label>Ngày chạy <input id="event-date" type="date"></label><label>Địa điểm <input id="event-location" placeholder="Địa điểm sự kiện"></label><label>MC <input id="event-mc" placeholder="Người dẫn chương trình"></label></div></div><div class="hero-side"><div class="clock-label">GIỜ HIỆN TẠI</div><div id="clock" class="clock">--:--:--</div><div id="event-range" class="range">Chưa có mốc thời gian</div></div></section>
+
+        <section class="summary"><div class="metric"><span>TỔNG MỐC</span><strong id="metric-cues">0</strong><small>trong kịch bản</small></div><div class="metric"><span>THỜI LƯỢNG</span><strong id="metric-duration">0 phút</strong><small>theo lịch trình</small></div><div class="metric"><span>ĐANG DIỄN RA</span><strong id="metric-current">Chưa bắt đầu</strong><small id="metric-next">Chưa có mốc tiếp theo</small></div><div class="metric progress-metric"><span>TIẾN ĐỘ</span><strong id="metric-progress">0%</strong><div class="progress-track"><i id="progress-bar"></i></div></div></section>
+
+        <div class="section-heading"><div><span class="eyebrow">PRODUCTION WORKSPACE</span><h2 id="view-title">Timeline chương trình</h2><p id="view-subtitle">Theo dõi nội dung, MC, kỹ thuật và máy quay trên cùng trục thời gian.</p></div><div class="section-actions"><button id="add-cue" class="btn primary">＋ Thêm mốc</button></div></div>
+
+        <section id="timeline-view" class="panel timeline-panel"><div class="panel-toolbar"><div class="toolbar-group"><span class="tag">TIMELINE</span><button id="live-toggle" class="pill active">● Theo giờ thực</button><label class="sim-label">Mô phỏng <input id="simulate-time" type="time" aria-label="Giờ mô phỏng"></label><button id="clear-sim" class="text-btn hidden">Đặt lại</button></div><div class="toolbar-group"><span class="muted">Thu phóng</span><button id="zoom-out" class="icon-btn">−</button><strong id="zoom-label">100%</strong><button id="zoom-in" class="icon-btn">＋</button><button id="fit-timeline" class="text-btn">Vừa màn hình</button></div></div><div class="timeline-scroll"><div id="timeline-canvas" class="timeline-canvas"></div></div><div class="timeline-footer"><span><i class="legend content"></i> Nội dung <i class="legend mc"></i> MC <i class="legend tech"></i> Kỹ thuật <i class="legend camera"></i> Máy quay</span><span>Chọn một mốc để xem và chỉnh sửa chi tiết</span></div></section>
+
+        <section id="rundown-view" class="panel hidden"><div class="list-tools"><input id="search-cues" type="search" placeholder="Tìm mốc, người phụ trách, ghi chú…" aria-label="Tìm mốc"><span id="list-count"></span></div><div id="cue-list" class="cue-list"></div></section>
+
+        <section id="scripts-view" class="panel hidden"><div class="list-tools"><h3>Toàn bộ kịch bản</h3><button id="create-script" class="btn primary">＋ Kịch bản mới</button></div><div id="script-grid" class="script-grid"></div></section>
+      </main>
+    </div>
+
+    <aside id="inspector" class="inspector"><div class="inspector-head"><div><span class="eyebrow">CUE INSPECTOR</span><h3>Chi tiết mốc</h3></div><button id="close-inspector" class="icon-btn">×</button></div><div id="inspector-body" class="inspector-body"><div class="empty-inspector">Chọn một mốc trên timeline hoặc danh sách để chỉnh sửa.</div></div></aside>
+    <nav class="mobile-nav"><button data-view="timeline">▥<small>Timeline</small></button><button data-view="rundown">☷<small>Mốc</small></button><button data-view="scripts">▧<small>Kịch bản</small></button><button id="mobile-import">↥<small>Nhập</small></button></nav>
+  </div>
+
+  <dialog id="import-dialog" class="modal"><form method="dialog" class="modal-head"><div><span class="eyebrow">CHUYỂN ĐỔI TRỰC TIẾP</span><h2>Nhập nhiều kịch bản</h2></div><button class="icon-btn" aria-label="Đóng">×</button></form><p>Dán nội dung hoặc chọn nhiều tệp. Mỗi tiêu đề “Kịch bản: …” tạo một kịch bản riêng; các dòng có giờ như <code>18:30 - 18:45 | Đón khách | MC</code> sẽ thành mốc. Không cần prompt AI.</p><div class="import-tabs"><button class="active" data-import-tab="paste">Dán văn bản</button><button data-import-tab="files">Chọn tệp</button></div><div id="paste-pane"><textarea id="import-text" placeholder="Kịch bản: Lễ khai mạc\n18:30 - 18:45 | Đón khách | Lễ tân\n18:45 - 19:00 | Ổn định chỗ ngồi | MC\n\nKịch bản: Phương án mưa\n18:30 - 18:50 | Đón khách tại hội trường | Lễ tân"></textarea></div><div id="files-pane" class="hidden"><label class="dropzone" for="import-files">↥<strong>Chọn tệp .docx, .txt, .csv hoặc .json</strong><span>Có thể chọn nhiều tệp cùng lúc</span></label><input id="import-files" type="file" accept=".docx,.txt,.csv,.json,application/json,text/plain,text/csv" multiple hidden><div id="file-names"></div></div><div id="import-preview" class="import-preview" aria-live="polite"></div><div class="modal-actions"><button id="preview-import" class="btn subtle" type="button">Xem trước</button><button id="confirm-import" class="btn primary" type="button" disabled>Tạo các kịch bản</button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
