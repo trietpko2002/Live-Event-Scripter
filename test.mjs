@@ -1,0 +1,73 @@
+import fs from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import {webcrypto} from 'node:crypto';
+
+const source = fs.readFileSync(new URL('./app.js',import.meta.url),'utf8').split("document.addEventListener('click'")[0];
+const store = new Map();
+const context = {crypto:webcrypto,localStorage:{getItem:key=>store.get(key)||null,setItem:(key,value)=>store.set(key,value)},document:{},window:{},console,setTimeout,Date};
+vm.createContext(context);
+vm.runInContext(source+'\nglobalThis.testAPI={parseText,parseCSV,parseJSON,fromLegacy,durationMinutes,scheduleIssues,buildConversionPrompt,elapsed,scheduleBounds,timelineGeometry,cueLanes,activeInfo,renderTimeline,updateClock,setSimulation,changeZoom,configure:(s)=>{state=s;},fit:(value)=>{fitMode=value;},playing:()=>{simulationPlaying=true;simulationAnchor=performance.now();},pause:()=>{simulationOffset+=(performance.now()-simulationAnchor)/60000;simulationPlaying=false;},layout:()=>timelineLayout};',context);
+const {parseText,parseCSV,parseJSON,fromLegacy,durationMinutes,scheduleIssues,buildConversionPrompt}=context.testAPI;
+
+const text=parseText('Kịch bản: Chính\n18:30 - 18:45 | Đón khách | Lễ tân\nKịch bản: Dự phòng\n18:30 - 19:00 | Chờ trong hội trường | MC');
+assert.equal(text.length,2);
+assert.equal(text[1].data.items[0].title,'Chờ trong hội trường');
+const section=parseText('Kịch bản: Chính\nPhân đoạn: Khai mạc\n19:00 - 19:05 | MC mở đầu');
+assert.equal(section[0].data.items[0].section,'Khai mạc');
+const csv=parseCSV('kịch bản,start,end,title,staff\nA,19:00,19:10,Chào mừng,MC\nB,19:00,19:20,Dự phòng,Kỹ thuật','x');
+assert.equal(csv.length,2);
+const json=parseJSON(JSON.stringify({properties:{title:'Cũ'},items:[{start:'19:00',end:'19:05',title:'Mục'}]}),'x');
+assert.equal(json[0].data.items[0].title,'Mục');
+const promptJSON=parseJSON(JSON.stringify({scripts:[{name:'Lễ chính',items:[{start:'19:00',end:'19:15',title:'Mở màn'}]},{name:'Trời mưa',items:[{start:'19:00',end:'19:20',title:'Trong nhà'}]}]}),'x');
+assert.equal(promptJSON.length,2);
+assert.match(buildConversionPrompt('Hai phương án khác nhau'),/Không gộp các phương án/);
+assert.match(buildConversionPrompt('Hai phương án khác nhau'),/Hai phương án khác nhau/);
+store.set('live_event_scripter_local_v3_script_list',JSON.stringify([{key:'default',name:'Cũ'}]));
+store.set('live_event_scripter_local_v3_script_default',JSON.stringify({properties:{title:'Cũ',details:{date:'2026-10-03'}},items:[{start:'19:00',end:'19:10',title:'Mục',cameraman:'toàn cảnh'}]}));
+assert.equal(fromLegacy().data.default.items[0].cameraman.cam1,'toàn cảnh');
+assert.equal(durationMinutes('23:55','00:05'),10);
+const issues=scheduleIssues([{id:'a',start:'19:00',end:'19:30',title:'A',priority:'Thấp',staff:'MC',itemStatus:'ready'},{id:'b',start:'19:20',end:'19:40',title:'B',priority:'Cao',staff:'',itemStatus:'review'}]);
+assert.ok(issues.some(x=>x.text.includes('chồng 10 phút')));
+assert.ok(issues.some(x=>x.text.includes('chưa có người phụ trách')));
+console.log('OK: multi-scenario import, generic prompt JSON, schedule diagnostics, legacy data and midnight timing');
+
+// Geometry regressions: zoom must change short timelines and fit the measured viewport.
+const api=context.testAPI;
+const short=api.elapsed([{start:'14:00',end:'14:10'}]);
+assert.equal(api.timelineGeometry(short,900,.5).width*2,api.timelineGeometry(short,900,1).width);
+api.fit(true);
+assert.equal(api.timelineGeometry(short,375,1).width,259);
+api.fit(false);
+const overlapping=api.elapsed([{start:'14:00',end:'15:00'},{start:'14:10',end:'14:20'}]);
+assert.equal(api.scheduleBounds(overlapping).end,915);
+assert.deepEqual(Array.from(api.cueLanes(overlapping)),[0,1]);
+const midnight=api.elapsed([{start:'23:55',end:'00:10'},{start:'00:10',end:'00:20'}]);
+assert.equal(midnight[1]._start,1450);
+assert.equal(api.elapsed([{start:'14:10',end:'14:20'},{start:'14:00',end:'14:05'}])[1]._start,840);
+
+// DOM integration without Firebase: render, zoom, playhead, event-day and advancing simulation.
+const elements=new Map();
+const element=()=>({style:{},classList:{contains:()=>false,toggle(){},add(){},remove(){}},setAttribute(){},clientWidth:900,scrollLeft:0,innerHTML:'',textContent:'',value:''});
+context.document.getElementById=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id);};
+const scroller=element();context.document.querySelector=()=>scroller;context.document.querySelectorAll=()=>[];
+let monotonic=0;context.performance={now:()=>monotonic};
+const cue=(id,start,end)=>({id,start,end,title:id,staff:'MC',note:'Video',cameraman:{cam1:'Wide'},liveStatus:'pending'});
+api.configure({scripts:[{key:'test',name:'Test'}],current:'test',data:{test:{properties:{details:{date:'2000-01-01'}},items:[cue('A','14:00','14:10'),cue('B','14:10','14:20')]}}});
+api.setSimulation('14:05');api.renderTimeline();
+assert.equal(api.activeInfo().index,0);
+assert.equal(api.activeInfo().progress,25);
+const first=api.layout().width;api.changeZoom(1.25);
+assert.equal(api.layout().width,first*1.25);
+api.fit(true);api.renderTimeline();assert.equal(api.layout().width,784);
+assert.match(elements.get('timeline-canvas').innerHTML,/width:784px/);
+api.playing();monotonic=6*60000;api.updateClock();
+assert.equal(api.activeInfo().index,1);assert.equal(api.activeInfo().now,851);
+assert.equal(elements.get('playhead-time').textContent,'14:11');
+api.pause();monotonic+=60000;assert.equal(api.activeInfo().now,851);
+api.playing();monotonic+=60000;assert.equal(api.activeInfo().now,852);
+api.setSimulation('');assert.equal(api.activeInfo().progress,100);
+api.configure({scripts:[{key:'test',name:'Test'}],current:'test',data:{test:{properties:{details:{date:'2026-10-18'}},items:midnight.map((x,i)=>cue(String(i),x.start,x.end))}}});
+api.setSimulation('00:15');assert.equal(api.activeInfo().now,1455);assert.equal(api.activeInfo().index,1);
+api.setSimulation('23:50');assert.equal(api.activeInfo().now,1430);api.playing();monotonic+=30*60000;assert.equal(api.activeInfo().now,1460);
+console.log('OK: zoom, measured fit, overlapping lanes, midnight, DOM rendering, playhead, pause/resume and event dates');
