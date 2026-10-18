@@ -18,6 +18,8 @@ const uid = () => crypto.randomUUID?.() || `id-${Date.now()}-${Math.random().toS
 const today = () => new Date().toLocaleDateString('en-CA');
 const blank = name => ({properties:{title:name,details:{date:today(),location:'',mc:'',coordinator:''}},items:[]});
 let state = {scripts:[],current:null,data:{}};
+let simulationOffset = 0, simulationAnchor = null, simulationPlaying = false, followPlayhead = true, fitMode = false, timelineLayout = null;
+const TRACK_LABEL_WIDTH = 116;
 let selected = null, view = 'timeline', zoom = 1, simulation = '', preview = [], importMode = 'paste', auth = null, history = [], future = [];
 
 function normalizeItem(item = {}) {
@@ -70,13 +72,77 @@ function commit(mutator) {
 }
 function undo() {if(!history.length)return;future.push(JSON.stringify(state));state=JSON.parse(history.pop());save();selected=null;render();}
 function redo() {if(!future.length)return;history.push(JSON.stringify(state));state=JSON.parse(future.pop());save();selected=null;render();}
-function minutes(t){const [h,m]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0);}
+function minutes(t){const [h,m,sec]=String(t||'0:0').split(':').map(Number);return (h||0)*60+(m||0)+(sec||0)/60;}
 function addMinutes(t,n){const m=(minutes(t)+n+1440)%1440;return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;}
 function durationMinutes(a,b){let d=minutes(b)-minutes(a);return d<0?d+1440:d;}
 function durationText(a,b){const m=durationMinutes(a,b);return `${Math.floor(m/60)}h ${String(m%60).padStart(2,'0')}m`;}
-function elapsed(items){let offset=0,last=-1;return items.map(item=>{let start=minutes(item.start)+offset;if(start<last){offset+=1440;start+=1440;}const length=Math.max(1,durationMinutes(item.start,item.end));last=start;return {...item,_start:start,_end:start+length};});}
+function elapsed(items){let offset=0,last=-1;return items.map(item=>{let start=minutes(item.start)+offset;if(start<last-720){offset+=1440;start+=1440;}const length=Math.max(1,durationMinutes(item.start,item.end));last=start;return {...item,_start:start,_end:start+length};});}
 function timeLabel(m){return `${String(Math.floor(m/60)%24).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;}
-function activeInfo(){const items=elapsed(data().items);if(!items.length)return {items,index:-1,progress:0};let now=simulation?minutes(simulation):new Date().getHours()*60+new Date().getMinutes();if(items[0]._start>=1440 && now<minutes(items[0].start))now+=1440;if(items.at(-1)._end>1440 && now<minutes(items[0].start))now+=1440;const index=items.findIndex(x=>now>=x._start&&now<x._end);const progress=Math.max(0,Math.min(100,Math.round((now-items[0]._start)/(items.at(-1)._end-items[0]._start)*100)));return {items,index,progress,now};}
+function scheduleBounds(items){
+  if(!items.length)return {start:0,end:30,span:30};
+  const start=Math.floor(Math.min(...items.map(x=>x._start))/15)*15;
+  const end=Math.max(start+30,Math.ceil(Math.max(...items.map(x=>x._end))/15)*15+15);
+  return {start,end,span:end-start};
+}
+function clockMinutes(){
+  const date=new Date();
+  if(simulation){
+    const elapsed=simulationPlaying&&simulationAnchor!==null?(performance.now()-simulationAnchor)/60000:0;
+    return minutes(simulation)+simulationOffset+elapsed;
+  }
+  const eventDay=new Date(`${data().properties.details.date}T00:00:00`);
+  const todayDay=new Date(date.getFullYear(),date.getMonth(),date.getDate());
+  const days=Math.round((todayDay-eventDay)/86400000);
+  return days*1440+date.getHours()*60+date.getMinutes()+date.getSeconds()/60;
+}
+function activeInfo(){
+  const items=elapsed(data().items),bounds=scheduleBounds(items);
+  let now=clockMinutes();
+  // A simulated time after midnight belongs to the next event day.
+  if(simulation&&items.some(x=>x._end>1440)&&now<720)now+=1440;
+  const index=items.findIndex(x=>now>=x._start&&now<x._end);
+  const end=items.length?Math.max(...items.map(x=>x._end)):bounds.end;
+  const progress=items.length?Math.max(0,Math.min(100,Math.round((now-items[0]._start)/Math.max(1,end-items[0]._start)*100))):0;
+  return {items,index,progress,now};
+}
+function timelineGeometry(items,viewport,scale=zoom){
+  const bounds=scheduleBounds(items);
+  const available=Math.max(1,viewport-TRACK_LABEL_WIDTH);
+  const width=fitMode?available:Math.max(1,bounds.span*scale*12);
+  return {...bounds,width,scale:width/bounds.span/12};
+}
+function cueLanes(items){
+  const ends=[];
+  return items.map(x=>{
+    let lane=ends.findIndex(end=>end<=x._start);
+    if(lane<0)lane=ends.length;
+    ends[lane]=x._end;
+    return lane;
+  });
+}
+function syncPlaybackControls(){
+  $('clear-sim').classList.toggle('hidden',!simulation);
+  $('play-simulation').disabled=!simulation;
+  $('play-simulation').textContent=simulationPlaying?'Ⅱ Tạm dừng':'▶ Chạy thử';
+  $('live-toggle').classList.toggle('active',!simulation);
+  $('follow-playhead').classList.toggle('active',followPlayhead);
+  $('follow-playhead').setAttribute('aria-pressed',String(followPlayhead));
+}
+function setSimulation(value,playing=false){
+  simulation=value;simulationOffset=0;simulationPlaying=Boolean(value)&&playing;
+  simulationAnchor=simulationPlaying?performance.now():null;
+  $('simulate-time').value=value;
+  syncPlaybackControls();updateClock();
+}
+function changeZoom(factor){
+  const scroller=document.querySelector('.timeline-scroll');
+  const old=timelineLayout;
+  const center=old?old.start+(scroller.scrollLeft+scroller.clientWidth/2-TRACK_LABEL_WIDTH)/old.width*old.span:0;
+  zoom=Math.max(.05,Math.min(16,(old?.scale||zoom)*factor));fitMode=false;
+  renderTimeline();
+  if(old&&timelineLayout)scroller.scrollLeft=TRACK_LABEL_WIDTH+(center-timelineLayout.start)/timelineLayout.span*timelineLayout.width-scroller.clientWidth/2;
+  updateClock(false);
+}
 function toast(message){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),3500);}
 
 function render(){
@@ -97,14 +163,26 @@ function render(){
 }
 function renderTimeline(){
   const items=elapsed(data().items),root=$('timeline-canvas');
-  if(!items.length){root.innerHTML='<div class="empty-inspector">Chưa có mốc. Nhấn “Thêm mốc” hoặc nhập kịch bản để bắt đầu.</div>';return;}
-  const start=Math.floor(items[0]._start/15)*15,end=Math.ceil(items.at(-1)._end/15)*15+15,span=Math.max(30,end-start);
-  const width=Math.max(740,span*zoom*3.2),grid=15/span*width;
-  const ruler=Array.from({length:Math.floor(span/15)+1},(_,i)=>`<div class="tick" style="left:${i*grid}px">${timeLabel(start+i*15)}</div>`).join('');
+  syncPlaybackControls();
+  if(!items.length){timelineLayout=null;root.style.width='100%';root.innerHTML='<div class="empty-inspector">Chưa có mốc. Nhấn “Thêm mốc” hoặc nhập kịch bản để bắt đầu.</div>';return;}
+  const scroller=document.querySelector('.timeline-scroll');
+  timelineLayout=timelineGeometry(items,scroller.clientWidth||800);
+  const {start,span,width,scale}=timelineLayout;
+  zoom=scale;$('zoom-label').textContent=Math.round(scale*100)+'%';
+  $('zoom-out').disabled=scale<=.05;$('zoom-in').disabled=scale>=16;
+  const step=[1,5,15,30,60,120,240,720,1440].find(n=>n/span*width>=60)||1440;
+  const grid=step/span*width;
+  const ruler=Array.from({length:Math.ceil(span/step)},(_,i)=>`<div class="tick" style="left:${i*grid}px">${timeLabel(start+i*step)}</div>`).join('');
   const tracks=[['content','▦','Nội dung',x=>x.title],['mc','◉','MC',x=>x.staff],['tech','⚡','Kỹ thuật',x=>x.note],['camera','◈','Máy quay',x=>[x.cameraman?.cam1,x.cameraman?.cam2,x.cameraman?.flycam].filter(Boolean).join(' / ')]];
-  root.style.width=`${width+116}px`;
-  root.innerHTML=`<div class="ruler" style="width:${width}px">${ruler}</div>${tracks.map(([type,icon,label,get])=>`<div class="track"><div class="track-label"><span>${icon}</span>${label}</div><div class="track-body" style="width:${width}px;--grid:${grid}px">${items.map((x,i)=>{const title=String(get(x)||'').trim();if(!title)return '';const left=(x._start-start)/span*width,w=Math.max(8,(x._end-x._start)/span*width);return `<button class="cue-block ${type} live-${x.liveStatus} ${selected===String(x.id)?'selected':''}" data-cue="${escapeHTML(x.id)}" style="left:${left}px;width:${w}px" title="${escapeHTML(timeLabel(x._start)+' '+title)}">${escapeHTML(title)}<small>${type==='content'?escapeHTML(x.start+'–'+x.end):''}</small></button>`}).join('')}</div></div>`).join('')}<div id="playhead" class="playhead" style="display:none"></div>`;
-  const {now}=activeInfo(),p=$('playhead');if(now>=start&&now<=end){p.style.display='block';p.style.left=`${116+(now-start)/span*width}px`;}
+  root.style.width=`${width+TRACK_LABEL_WIDTH}px`;
+  root.innerHTML=`<div class="ruler" style="width:${width}px">${ruler}</div>${tracks.map(([type,icon,label,get])=>{
+    const cues=items.filter(x=>String(get(x)||'').trim()),lanes=cueLanes(cues),height=Math.max(74,(Math.max(-1,...lanes)+1)*58+16);
+    return `<div class="track"><div class="track-label"><span>${icon}</span>${label}</div><div class="track-body" style="width:${width}px;height:${height}px;--grid:${grid}px">${cues.map((x,i)=>{
+      const title=String(get(x)),left=(x._start-start)/span*width,w=(x._end-x._start)/span*width;
+      return `<button class="cue-block ${type} live-${x.liveStatus} ${selected===String(x.id)?'selected':''}" data-cue="${escapeHTML(x.id)}" style="left:${left}px;width:${w}px;top:${13+lanes[i]*58}px" title="${escapeHTML(x.start+'–'+x.end+' · '+title)}" aria-label="${escapeHTML(x.start+'–'+x.end+' · '+title)}">${escapeHTML(title)}<small>${type==='content'?escapeHTML(x.start+'–'+x.end):''}</small></button>`;
+    }).join('')}</div></div>`;
+  }).join('')}<div id="playhead" class="playhead" style="display:none"><span id="playhead-time"></span></div>`;
+  updateClock(false);
 }
 function renderList(){
   const q=$('search-cues').value.trim().toLocaleLowerCase('vi');
@@ -128,7 +206,7 @@ function renderInspector(){
   const statusText=({pending:'Chưa chạy',running:'Đang chạy',done:'Hoàn thành',skipped:'Bỏ qua'})[x.liveStatus];
   el.innerHTML=`<div class="live-control"><span class="eyebrow">TRẠNG THÁI ĐIỀU HÀNH</span><strong>${statusText}</strong><div class="inspector-actions"><button class="btn primary" data-live="start">▶ Bắt đầu</button><button class="btn subtle" data-live="done">✓ Hoàn thành</button><button class="btn subtle" data-live="skip">Bỏ qua</button><button class="btn subtle" data-live="reset">Đặt lại</button></div>${x.actualStart?`<small>Bắt đầu thực tế: ${e(new Date(x.actualStart).toLocaleTimeString('vi-VN'))}${x.actualEnd?' · Kết thúc: '+e(new Date(x.actualEnd).toLocaleTimeString('vi-VN')):''}</small>`:''}</div><hr class="divider"><label class="field">Phân đoạn / chương<input data-field="section" placeholder="Ví dụ: Khai mạc" value="${e(x.section)}"></label><label class="field">Loại mốc<select data-field="cueType">${typeSelect}</select></label><label class="field">Tên mốc<input data-field="title" value="${e(x.title)}"></label><div class="field-row"><label class="field">Bắt đầu<input type="time" data-field="start" value="${e(x.start)}"></label><label class="field">Kết thúc<input type="time" data-field="end" value="${e(x.end)}"></label></div><label class="field">Nội dung / lời dẫn<textarea data-field="desc">${e(x.desc)}</textarea></label><label class="field">MC / Phụ trách<input data-field="staff" value="${e(x.staff)}"></label><label class="field">Ghi chú kỹ thuật<input data-field="note" value="${e(x.note)}"></label><label class="field">Phương án dự phòng<textarea data-field="fallback" placeholder="Nếu mốc thay đổi hoặc thiết bị gặp sự cố...">${e(x.fallback)}</textarea></label><div class="field-row"><label class="field">Cam 1<input data-camera="cam1" value="${e(x.cameraman.cam1)}"></label><label class="field">Cam 2<input data-camera="cam2" value="${e(x.cameraman.cam2)}"></label></div><label class="field">Flycam<input data-camera="flycam" value="${e(x.cameraman.flycam)}"></label><div class="field-row"><label class="field">Ưu tiên<select data-field="priority">${['Thấp','Trung bình','Cao'].map(v=>`<option ${x.priority===v?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Duyệt nội dung<select data-field="itemStatus"><option value="ready" ${x.itemStatus==='ready'?'selected':''}>Sẵn sàng</option><option value="review" ${x.itemStatus==='review'?'selected':''}>Cần xem lại</option><option value="approved" ${x.itemStatus==='approved'?'selected':''}>Đã duyệt</option></select></label></div><hr class="divider"><div class="inspector-actions"><button class="btn subtle" data-action="duplicate">⧉ Nhân bản</button><button class="btn subtle" data-action="up">↑</button><button class="btn subtle" data-action="down">↓</button><button class="btn subtle danger" data-action="delete">Xóa</button></div>`;
 }
-function updateClock(){
+function updateClock(autoFollow=true){
   if($('app').classList.contains('hidden'))return;
   $('clock').textContent=new Date().toLocaleTimeString('vi-VN',{hour12:false});
   const {items,index,progress,now}=activeInfo();
@@ -137,13 +215,24 @@ function updateClock(){
   const done=items.filter(x=>['done','skipped'].includes(x.liveStatus)).length;
   const shownProgress=hasLive&&items.length?Math.round(done/items.length*100):progress;
   $('metric-cues').textContent=items.length;
-  $('metric-duration').textContent=items.length?`${Math.round((items.at(-1)._end-items[0]._start)/60*10)/10} giờ`:'0 phút';
+  $('metric-duration').textContent=items.length?`${Math.round((Math.max(...items.map(x=>x._end))-items[0]._start)/60*10)/10} giờ`:'0 phút';
   $('metric-current').textContent=running?.title||(index>=0?items[index].title:progress>=100?'Đã kết thúc':'Chưa bắt đầu');
   const next=hasLive?items.find(x=>x.liveStatus==='pending'):items[index+1];
   $('metric-next').textContent=next?`Tiếp theo: ${next.title}`:'Không có mốc tiếp theo';
   $('metric-progress').textContent=shownProgress+'%';$('progress-bar').style.width=shownProgress+'%';
   $('event-range').textContent=items.length?`${items[0].start} – ${items.at(-1).end} · ${items.length} mốc`:'Chưa có mốc thời gian';
-  const p=$('playhead');if(p&&items.length){const start=Math.floor(items[0]._start/15)*15,end=Math.ceil(items.at(-1)._end/15)*15+15;p.style.display=now>=start&&now<=end?'block':'none';p.style.left=`${116+(now-start)/(end-start)*Math.max(740,(end-start)*zoom*3.2)}px`;}
+  document.querySelectorAll('.cue-block').forEach(el=>el.classList.toggle('time-active',items.some(x=>String(x.id)===el.dataset.cue&&now>=x._start&&now<x._end)));
+  const p=$('playhead');
+  if(p&&timelineLayout){
+    const {start,end,span,width}=timelineLayout,visible=now>=start&&now<=end;
+    const left=TRACK_LABEL_WIDTH+(now-start)/span*width;
+    p.style.display=visible?'block':'none';p.style.left=`${left}px`;
+    $('playhead-time').textContent=timeLabel(Math.floor(((now%1440)+1440)%1440));
+    if(visible&&autoFollow&&followPlayhead&&view==='timeline'){
+      const scroller=document.querySelector('.timeline-scroll');
+      if(left<scroller.scrollLeft+TRACK_LABEL_WIDTH+24||left>scroller.scrollLeft+scroller.clientWidth-40)scroller.scrollLeft=Math.max(0,left-scroller.clientWidth*.55);
+    }
+  }
 }
 function scheduleIssues(items){
   const issues=[],expanded=elapsed(items);
@@ -232,12 +321,23 @@ for(const id of ['quick-add-script','create-script'])$(id).addEventListener('cli
 $('undo-btn').addEventListener('click',undo);$('redo-btn').addEventListener('click',redo);
 $('search-cues').addEventListener('input',renderList);
 $('close-inspector').addEventListener('click',()=>$('inspector').classList.remove('open'));
-$('zoom-in').addEventListener('click',()=>{zoom=Math.min(4,zoom*1.25);$('zoom-label').textContent=Math.round(zoom*100)+'%';renderTimeline();});
-$('zoom-out').addEventListener('click',()=>{zoom=Math.max(.5,zoom/1.25);$('zoom-label').textContent=Math.round(zoom*100)+'%';renderTimeline();});
-$('fit-timeline').addEventListener('click',()=>{zoom=.7;$('zoom-label').textContent='70%';renderTimeline();});
-$('simulate-time').addEventListener('change',e=>{simulation=e.target.value;$('clear-sim').classList.toggle('hidden',!simulation);$('live-toggle').classList.toggle('active',!simulation);renderTimeline();updateClock();});
-$('clear-sim').addEventListener('click',()=>{simulation='';$('simulate-time').value='';$('clear-sim').classList.add('hidden');$('live-toggle').classList.add('active');renderTimeline();updateClock();});
-$('live-toggle').addEventListener('click',()=>$('clear-sim').click());
+$('zoom-in').addEventListener('click',()=>changeZoom(1.25));
+$('zoom-out').addEventListener('click',()=>changeZoom(1/1.25));
+$('fit-timeline').addEventListener('click',()=>{fitMode=true;renderTimeline();document.querySelector('.timeline-scroll').scrollLeft=0;});
+$('simulate-time').addEventListener('change',e=>setSimulation(e.target.value));
+$('clear-sim').addEventListener('click',()=>setSimulation(''));
+$('live-toggle').addEventListener('click',()=>setSimulation(''));
+$('play-simulation').addEventListener('click',()=>{
+  if(!simulation)return;
+  if(simulationPlaying)simulationOffset+=(performance.now()-simulationAnchor)/60000;
+  simulationPlaying=!simulationPlaying;simulationAnchor=simulationPlaying?performance.now():null;
+  syncPlaybackControls();updateClock();
+});
+$('follow-playhead').addEventListener('click',()=>{followPlayhead=!followPlayhead;syncPlaybackControls();updateClock();});
+document.querySelector('.timeline-scroll').addEventListener('wheel',e=>{
+  if(e.ctrlKey||e.metaKey){e.preventDefault();changeZoom(e.deltaY<0?1.1:1/1.1);}
+},{passive:false});
+if(typeof ResizeObserver!=='undefined')new ResizeObserver(()=>{if(fitMode&&view==='timeline')renderTimeline();}).observe(document.querySelector('.timeline-scroll'));
 $('preview-import').addEventListener('click',previewImport);$('confirm-import').addEventListener('click',commitImport);
 $('import-files').addEventListener('change',e=>{$('file-names').textContent=[...e.target.files].map(x=>x.name).join(' · ');preview=[];$('confirm-import').disabled=true;});
 $('copy-prompt').addEventListener('click',async()=>{const promptText=buildConversionPrompt($('prompt-source').value);try{await navigator.clipboard.writeText(promptText);toast('Đã sao chép prompt. Dán vào công cụ AI bạn chọn, rồi nhập JSON trả về.');}catch{$('import-preview').innerHTML=`<textarea id="generated-prompt" readonly>${escapeHTML(promptText)}</textarea>`;const box=$('generated-prompt');box.select();toast('Không sao chép tự động được. Hãy sao chép nội dung đã chọn.');}});

@@ -48,3 +48,12 @@ Các cột: `kịch bản,start,end,title,staff,note`. Giờ theo `HH:MM`. Có t
 - Chuyển đổi văn bản theo quy tắc giờ bắt đầu và kết thúc; các tài liệu Word không có mốc giờ rõ ràng cần chỉnh lại sau khi nhập.
 - Không có đồng bộ dữ liệu trực tuyến hay phân quyền ekip. Firebase trong bản này chỉ xác thực Google.
 - Chưa kiểm thử đăng nhập trên tên miền triển khai mới; cần kiểm tra thủ công sau khi Cloudflare Pages phát hành.
+
+## Sửa timeline v4.2
+
+- Thu phóng thay đổi chiều rộng theo thời lượng thật; giữ vị trí trung tâm khi đổi tỷ lệ, hỗ trợ Ctrl/⌘ + lăn chuột.
+- Vừa màn hình đo đúng vùng hiển thị và cập nhật khi đổi kích thước cửa sổ. Tên các hàng được giữ khi cuộn ngang.
+- Mô phỏng: chọn giờ rồi nhấn Chạy thử; có thể tạm dừng, tiếp tục và trở về Theo giờ thực. Nút Theo vạch chạy bật/tắt tự cuộn đến giờ đang chạy.
+- Giờ thực xét ngày sự kiện; mô phỏng cho phép chạy thử vào ngày bất kỳ. Mốc qua nửa đêm được giữ trên cùng trục.
+- Mốc chồng giờ xếp thành hàng riêng, không kéo dài giả thời lượng để lấp chỗ trống.
+- Kiểm tra: `node --check app.js` và `node test.mjs` (nhập liệu, dữ liệu cũ, thu phóng, vừa màn hình, xếp hàng, vạch chạy, mô phỏng và qua nửa đêm). Chưa kiểm thử trực quan trong trình duyệt hoặc đăng nhập Google ở phiên sửa này.

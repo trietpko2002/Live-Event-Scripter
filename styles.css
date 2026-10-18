@@ -6,3 +6,15 @@
 /* Studio v4.1 — production workflow */
 .section-actions select{border:1px solid #dfe6eb;background:white;color:#526477;border-radius:10px;padding:10px;max-width:155px;font-size:12px;font-weight:700}.script-tools{display:flex;gap:8px;flex-wrap:wrap;margin:-3px 0 16px}.script-tools .btn{font-size:11px;padding:8px 10px}.script-tools span{color:#ba6945}.validation-panel{background:#fff;border:1px solid #e5e9ed;border-radius:12px;margin:0 0 16px;padding:15px;display:grid;gap:8px}.validation-panel strong{font-size:12px}.issue{border:0;border-radius:8px;background:#fff4e9;color:#855b32;text-align:left;padding:10px 12px;font-size:12px}.issue.error{background:#fff0ef;color:#b34848}.issue:hover{filter:brightness(.97)}.section-divider{background:#f5f8f9;padding:9px 20px;font-size:10px;font-weight:800;letter-spacing:.1em;color:#577269;border-bottom:1px solid #e6edef}.status.running{background:#d8f6e9;color:#087e5f;font-weight:800}.cue-block.live-running{box-shadow:0 0 0 3px #3fd2a488}.cue-block.live-done{opacity:.65}.cue-block.live-skipped{text-decoration:line-through;opacity:.4}.live-control{background:#eefaf5;border:1px solid #d4eee3;border-radius:11px;padding:13px}.live-control strong{display:block;margin:8px 0;color:#13846b;font-size:16px}.live-control .inspector-actions{margin:10px 0}.live-control .btn{font-size:10px;padding:7px}.live-control small{display:block;color:#668379;font-size:10px;line-height:1.5}.version-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 2px;border-bottom:1px solid #e7edef}.version-row strong,.version-row small{display:block}.version-row strong{font-size:13px}.version-row small{color:#8c9eaa;margin-top:4px;font-size:11px}#prompt-pane small{display:block;color:#8c9eaa;line-height:1.5;margin:8px 0}#prompt-pane .btn{margin-top:10px}
 @media(max-width:800px){.section-heading{align-items:start;gap:10px}.section-actions{flex-direction:column;align-items:stretch}.section-actions select{max-width:135px}.script-tools{overflow-x:auto;flex-wrap:nowrap;padding-bottom:5px}.script-tools .btn{flex:none}}
+
+/* Timeline: preserve real duration, scroll the canvas, keep lane names visible. */
+.timeline-scroll{max-width:100%;overscroll-behavior-x:contain;scrollbar-gutter:stable;min-height:360px;padding-bottom:10px}
+.timeline-canvas{min-width:0;min-height:340px}
+.track{grid-template-columns:116px minmax(0,1fr)}
+.track-label{position:sticky;left:0;z-index:6;align-self:stretch;box-shadow:3px 0 6px #18243308}
+.cue-block{min-width:0;padding:8px 4px;max-width:100%;touch-action:manipulation}
+.cue-block.time-active{filter:brightness(.94);box-shadow:inset 0 0 0 2px currentColor;z-index:3}
+.cue-block:focus-visible{outline:2px solid #183e3b;outline-offset:2px;z-index:7}
+.playhead span{position:absolute;top:0;left:3px;padding:3px 5px;border-radius:4px;background:#c73b45;color:white;font-size:10px;font-weight:800;white-space:nowrap}
+.toolbar-group{min-width:0}#zoom-label{min-width:40px;text-align:center}
+@media(max-width:800px){.panel-toolbar>.toolbar-group{width:100%;gap:7px}.timeline-footer{line-height:1.6}.timeline-scroll{min-height:350px}}
